@@ -2,9 +2,10 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from marshmallow import Schema, fields, validate, ValidationError
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Integer, String
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session
+from sqlalchemy import Integer, String, asc, desc
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, session
 from typing import List
+
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:Mysql24$@localhost/LDMusic'
@@ -231,7 +232,7 @@ def remove_playlist_song():
     return jsonify({"message": f"{song.name} removed from {playlist.name} successfully"}), 200
 
 
-#Sort songs in playlist by genre
+#Sort songs in playlist by name,genre,artist
 @app.route("/playlists/sort", methods=["GET"])
 def sort_playlist_songs():
     playlist_name = request.args.get('name')
@@ -239,5 +240,10 @@ def sort_playlist_songs():
     playlist = Playlist.query.get(playlist_name)
     if playlist is None:
         return jsonify({"message": "Playlist not found"}), 404
+
+    sorted_playlist_multi = session.query(Song).order_by(Song.name, desc(Song.artist), desc(Song.genre)).all()
+    
+    db.session.commit()
+
     
     
