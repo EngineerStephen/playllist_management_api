@@ -1,21 +1,19 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from marshmallow import Schema, fields, validate, ValidationError
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Integer, String, asc, desc
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, session
+from sqlalchemy import asc, desc
+from sqlalchemy.orm import sessionmaker, scoped_session
 from typing import List
-
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:Mysql24$@localhost/LDMusic'
 db = SQLAlchemy(app)
 
+# Set up session maker and session object
+Session = sessionmaker(bind=db.engine)
+session = scoped_session(Session)
 
-
-========================================================================================================================================================================
-#SCHEMAS for songs and playlist 
-
+# SCHEMAS for songs and playlist 
 class SongSchema(Schema):
     name = fields.String(required=True, validate=validate.Length(min=1, max=100))
     genre = fields.String(required=True, validate=validate.Length(min=1, max=100))
@@ -23,18 +21,15 @@ class SongSchema(Schema):
 
     class Meta:
         fields = ("name", "genre", "artist")
-        
-        
 
 class PlaylistSchema(Schema):
     name = fields.String(required=True, validate=validate.Length(min=1, max=100))
     genre = fields.String(required=True, validate=validate.Length(min=1, max=100))
 
     class Meta:
-        fields = ("name","genre","artist")
-    
+        fields = ("name", "genre", "artist")
 
-========================================================================================================================================================================
+# MODELS
 class Song(db.Model):
     __tablename__ = 'songs'
 
@@ -58,14 +53,11 @@ class Playlist(db.Model):
 class PlaylistSong(db.Model):
     __tablename__ = 'playlist_songs'
 
-    playlist_name = db.Column(db.Integer, db.ForeignKey('playlists.id'), primary_key=True)
-    song_name = db.Column(db.Integer, db.ForeignKey('songs.id'), primary_key=True)
+    playlist_id = db.Column(db.Integer, db.ForeignKey('playlists.id'), primary_key=True)
+    song_id = db.Column(db.Integer, db.ForeignKey('songs.id'), primary_key=True)
 
-
-
-========================================================================================================================================================================
-#Endpoints for songs and playlist
-   # Route to create a new song
+# ENDPOINTS for songs and playlist
+# Route to create a new song
 @app.route("/songs", methods=["POST"])
 def create_songs():
     song_data = request.json
@@ -96,7 +88,7 @@ def update_songs():
     except ValidationError as err:
         return jsonify(err.messages), 400
     
-    song = Song.query.get(song_name)
+    song = session.get(Song, song_name)
     if song is None:
         return jsonify({"message": "Song not found"}), 404
     
@@ -112,7 +104,7 @@ def update_songs():
 def delete_songs():
     song_name = request.args.get('name')
     
-    song = Song.query.get(song_name)
+    song = session.get(Song, song_name)
     if song is None:
         return jsonify({"message": "Song not found"}), 404
     
@@ -126,7 +118,7 @@ def delete_songs():
 def get_songs():
     song_name = request.args.get('name')
     
-    song = Song.query.get(song_name)
+    song = session.get(Song, song_name)
     if song is None:
         return jsonify({"message": "Song not found"}), 404
     
@@ -163,7 +155,7 @@ def update_playlist():
     except ValidationError as err:
         return jsonify(err.messages), 400
     
-    playlist = Playlist.query.get(playlist_name)
+    playlist = session.get(Playlist, playlist_name)
     if playlist is None:
         return jsonify({"message": "Playlist not found"}), 404
     
@@ -179,7 +171,7 @@ def update_playlist():
 def delete_playlist():
     playlist_name = request.args.get('name')
     
-    playlist = Playlist.query.get(playlist_name)
+    playlist = session.get(Playlist, playlist_name)
     if playlist is None:
         return jsonify({"message": "Playlist not found"}), 404
     
@@ -188,18 +180,14 @@ def delete_playlist():
     
     return jsonify({"message": f"{playlist.name} deleted successfully"}), 200
 
-
-
-
-
-#Route to add song to playlist
+# Route to add a song to a playlist
 @app.route("/playlists/add_song", methods=["POST"])
 def add_playlist_song():
     playlist_name = request.args.get('playlist_name')
     song_name = request.args.get('song_name')
     
-    playlist = Playlist.query.get(playlist_name)
-    song = Song.query.get(song_name)
+    playlist = session.get(Playlist, playlist_name)
+    song = session.get(Song, song_name)
     
     if playlist is None:
         return jsonify({"message": "Playlist not found"}), 404
@@ -209,17 +197,16 @@ def add_playlist_song():
     playlist.songs.append(song)
     db.session.commit()
     
-    
     return jsonify({"message": f"{song.name} added to {playlist.name} successfully"}), 200
 
-#Route to remove song from playlist
+# Route to remove a song from a playlist
 @app.route("/playlists/remove_song", methods=["DELETE"])
 def remove_playlist_song():
     playlist_name = request.args.get('playlist_name')
     song_name = request.args.get('song_name')
     
-    playlist = Playlist.query.get(playlist_name)
-    song = Song.query.get(song_name)
+    playlist = session.get(Playlist, playlist_name)
+    song = session.get(Song, song_name)
     
     if playlist is None:
         return jsonify({"message": "Playlist not found"}), 404
@@ -231,19 +218,17 @@ def remove_playlist_song():
     
     return jsonify({"message": f"{song.name} removed from {playlist.name} successfully"}), 200
 
-
-#Sort songs in playlist by name,genre,artist
+# Sort songs in playlist by name, genre, artist
 @app.route("/playlists/sort", methods=["GET"])
 def sort_playlist_songs():
     playlist_name = request.args.get('name')
     
-    playlist = Playlist.query.get(playlist_name)
+    playlist = session.get(Playlist, playlist_name)
     if playlist is None:
         return jsonify({"message": "Playlist not found"}), 404
 
-    sorted_playlist_multi = session.query(Song).order_by(Song.name, desc(Song.artist), desc(Song.genre)).all()
+    sorted_songs = session.query(Song).join(Playlist.songs).filter(Playlist.id == playlist.id).order_by(asc(Song.name), desc(Song.artist), desc(Song.genre)).all()
     
-    db.session.commit()
-
+    sorted_songs_data = [{"name": song.name, "genre": song.genre, "artist": song.artist} for song in sorted_songs]
     
-    
+    return jsonify(sorted_songs_data), 200
